@@ -78,7 +78,7 @@ class StubBackend(Backend):
         if "security filter flagged" in system:
             return "I'm sorry, I can't help with that request. Is there anything else about your order I can do?"
         if "[tool result" in last:
-            m = re.search(r"transaction_id'?:?\s*'?([A-Za-z0-9-]+)", last)
+            m = re.search(r"transaction_id\W*([A-Za-z0-9-]+)", last)   # dict repr or JSON
             tx = m.group(1) if m else "on your account"
             return f"Your refund has been processed; the transaction reference is {tx}."
         cfg = _between(system, "=== OPERATOR CONFIGURATION ===", "===").strip()

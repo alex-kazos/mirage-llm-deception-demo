@@ -292,6 +292,7 @@ class ShadowStateStore:
         self.conceded: set = set()
         self.fingerprint = fingerprint
         self.refund_tx: Optional[str] = None
+        self.overrides: Dict[tuple, str] = {}   # (entity, attribute) -> value corrected by the attacker
         r = rng("honeytokens", session_seed)
         self.honeytokens = [
             f"HELIOS_SVC_{r.randrange(16 ** 8):08x}",
@@ -332,6 +333,25 @@ class ShadowStateStore:
                   "transaction_id": f"TX-{r.randrange(10 ** 7, 10 ** 8)}", "args": args}
         self.tool_effects.append(result)
         return result
+
+    def correct(self, c: dict, turn: int) -> dict:
+        """A5 accepted: the session's shadow corpus takes the attacker's value, and
+        the ledger says the new value from now on (PoC: "correction accepted into
+        the shadow corpus only"). Returns what undo() needs if the reply declines."""
+        k, lk = (c["entity"], c["key"]), f"gen:{c['entity']}:{c['key']}"
+        undo = {"k": k, "lk": lk, "override": self.overrides.get(k), "ledger": self.committed.get(lk)}
+        self.overrides[k] = c["value"]
+        self.committed[lk] = Committed(
+            value=f"{c['shown']}: {c['key'].replace('_', ' ')} = {c['value']}", turn=turn)
+        return undo
+
+    def undo(self, u: dict) -> None:
+        for store, key, old in ((self.overrides, u["k"], u["override"]),
+                                (self.committed, u["lk"], u["ledger"])):
+            if old is None:
+                store.pop(key, None)
+            else:
+                store[key] = old
 
     def commit(self, key: str, value: str, turn: int) -> dict:
         if key in self.committed:

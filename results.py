@@ -72,12 +72,14 @@ def main():
     summary_rows, detail_rows = [], []
     print(f"Running {len(models)} model(s) x {len(conditions)} condition(s), "
           f"{args.repeats} repeat(s). Self-judge: {args.judge}.\n")
-    header = f"{'model':<24}{'condition':<20}{'self-report':>12}{'real asset':>12}{'DSR':>8}{'key out':>9}{'burn':>7}"
+    header = (f"{'model':<24}{'condition':<20}{'self-report':>12}{'real asset':>12}{'DSR':>8}"
+              f"{'key out':>9}{'burn':>7}{'consistent':>12}")
     print(header)
     print("-" * len(header))
     for name, backend in models:
         for cond in conditions:
-            agg = {"self": 0.0, "real": 0.0, "dsr": 0.0, "delivered": 0, "burn": 0}
+            agg = {"self": 0.0, "real": 0.0, "dsr": 0.0, "delivered": 0, "burn": 0,
+                   "checked": 0, "held": 0}
             last = None
             for _ in range(args.repeats):
                 r = run_campaign(cond, backend, cfg=Config(), judge_backend=judge)
@@ -87,6 +89,8 @@ def main():
                 agg["dsr"] += s["deception_success_rate"]
                 agg["delivered"] += int(s["honeytoken_delivered"])
                 agg["burn"] += int(s["honeytoken_burn"])
+                agg["checked"] += s["consistency_checked"]
+                agg["held"] += s["consistency_held"]
                 last = r
             k = args.repeats
             row = {"model": name, "condition": cond,
@@ -94,14 +98,17 @@ def main():
                    "real_asset_rate": round(agg["real"] / k, 3),
                    "deception_success_rate": round(agg["dsr"] / k, 3),
                    "honeytoken_delivered_rate": round(agg["delivered"] / k, 3),
-                   "honeytoken_burn_rate": round(agg["burn"] / k, 3)}
+                   "honeytoken_burn_rate": round(agg["burn"] / k, 3),
+                   # pooled over repeats: consistent re-asks / re-asks with something to compare
+                   "consistency_rate": round(agg["held"] / agg["checked"], 3) if agg["checked"] else ""}
             summary_rows.append(row)
             for d in last.rows:
                 detail_rows.append({"model": name, "condition": cond, **d})
             print(f"{name:<24}{CONDITIONS.get(cond, cond):<20}"
                   f"{row['self_report_rate']:>12.2f}{row['real_asset_rate']:>12.2f}"
                   f"{row['deception_success_rate']:>8.2f}{row['honeytoken_delivered_rate']:>9.1f}"
-                  f"{row['honeytoken_burn_rate']:>7.1f}")
+                  f"{row['honeytoken_burn_rate']:>7.1f}"
+                  f"{agg['held']:>8}/{agg['checked']:<3}")
 
     _write_csv(outdir / "summary.csv", summary_rows)
     _write_csv(outdir / "detail.csv", detail_rows,

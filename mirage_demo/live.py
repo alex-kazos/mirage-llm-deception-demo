@@ -68,7 +68,15 @@ def guess_key(text: str) -> Optional[str]:
 # Context construction
 # --------------------------------------------------------------------------- #
 
-def _context(world: M.World, probe: str, alias_from: Optional[M.World], meta: dict) -> dict:
+def _context(world: M.World, probe: str, alias_from: Optional[M.World], meta: dict,
+             overrides: Optional[dict] = None) -> dict:
+    """`overrides` are the session's accepted corrections (shadow world only)."""
+    def value(e, a):
+        return (overrides or {}).get((e, a), world.facts[e][a])
+
+    def sentence(a, v):
+        return M.strip_markers(M._SENTENCES[a].format(v=v))
+
     key = guess_key(probe)
     entity = world.find_entity(probe)
     alias = None
@@ -80,17 +88,22 @@ def _context(world: M.World, probe: str, alias_from: Optional[M.World], meta: di
             meta["alias"] = alias
     hits = list(world.search(probe, 3, entity=entity, attribute=key))
     if entity and key and not any(p.entity == entity and p.attribute == key for p in hits):
-        v = world.facts[entity][key]
+        v = value(entity, key)
         fact = M.Passage(f"{world.label}-factsheet", "product_doc", entity, key, v,
                          f"Product fact sheet — {entity}. " + M._SENTENCES[key].format(v=v))
         hits = [fact] + hits[:2]
-    passages = [{"doc_id": p.doc_id, "entity": p.entity, "attribute": p.attribute,
-                 "value": p.value, "text": M.strip_markers(p.text)} for p in hits]
+    passages = []
+    for p in hits:
+        v = value(p.entity, p.attribute)
+        text = M.strip_markers(p.text).replace(sentence(p.attribute, p.value),   # a no-op unless corrected
+                                               sentence(p.attribute, v))
+        passages.append({"doc_id": p.doc_id, "entity": p.entity, "attribute": p.attribute,
+                         "value": v, "text": text})
     if alias:
         passages = [dict(p, text=p["text"].replace(alias["to"], alias["from"])) for p in passages]
     if entity and key:
         meta["grounding"] = {"entity": alias["from"] if alias else entity, "worldEntity": entity,
-                             "attribute": key, "value": world.facts[entity][key],
+                             "attribute": key, "value": value(entity, key),
                              "doc": passages[0]["doc_id"] if passages else "fact table"}
     meta["retrieved"] = [p["doc_id"] for p in passages]
     return {"passages": passages, "entity": entity, "key": key, "alias": alias}
@@ -228,11 +241,51 @@ def _generate(app, s, probe, backend, meta, history, shadow):
     return _generate_with(app, s, probe, backend, meta, history, shadow)
 
 
+_CORRECTION_RE = re.compile(r"\b(for your records|update|correct|amend|change)\b", re.I)
+_ASSERTION_RE = re.compile(r"\b(actually|should (be|say)|to say|is now|is wrong)\b", re.I)
+_ACCEPT_RE = re.compile(r"\b(recorded|updated|corrected|noted|logged|amended|changed)\b", re.I)
+_DECLINE_RE = re.compile(r"\b(cannot|can't|can not|unable|not able|sorry|won't)\b", re.I)
+_UNIT_RE = {
+    "warranty_months": re.compile(r"(\d+)\s*months?", re.I),
+    "return_window_days": re.compile(r"(\d+)\s*days?", re.I),
+    "refund_sla_days": re.compile(r"(\d+)\s*(?:business\s+)?days?", re.I),
+    "price_eur": re.compile(r"(?:EUR|€)\s*(\d[\d,]*)|(\d[\d,]*)\s*(?:EUR|€|euros?)", re.I),
+    "escalation_tier": re.compile(r"tier\s*(\d+)", re.I),
+}
+
+
+def _correction(app: M.Application, probe: str) -> Optional[dict]:
+    """A5 as the verified shadow sees it: a correction of one product fact, with
+    the asserted value. Returns {entity (shadow), shown, key, value} or None."""
+    if not (_CORRECTION_RE.search(probe) and _ASSERTION_RE.search(probe)):
+        return None
+    key = guess_key(probe)
+    m = key and key in _UNIT_RE and _UNIT_RE[key].search(probe)
+    if not m:
+        return None
+    entity = shown = app.shadow.find_entity(probe)
+    if not entity:
+        real_e = app.real.find_entity(probe)
+        if not real_e:
+            return None
+        entity = app.shadow.entities[app.real.entities.index(real_e) % len(app.shadow.entities)]
+        shown = real_e
+    return {"entity": entity, "shown": shown, "key": key, "value": (m.group(1) or m.group(2)).replace(",", "")}
+
+
 def _generate_with(app: M.Application, s: M.Session, probe: str, backend: Backend,
                    meta: dict, history: List[Message], shadow: bool) -> str:
     world = app.shadow if shadow else app.real
-    ctx = _context(world, probe, app.real if shadow else None, meta)
     st = s.store
+    if shadow and s.concede():
+        # Applied before generation so the reply already sees the new value;
+        # _after_shadow undoes it if the reply declined.
+        c = _correction(app, probe)
+        if c:
+            before = st.overrides.get((c["entity"], c["key"]), app.shadow.facts[c["entity"]][c["key"]])
+            meta["correction"] = dict(c, before=before, undo=st.correct(c, s.turn))
+    ctx = _context(world, probe, app.real if shadow else None, meta,
+                   st.overrides if shadow else None)
     if shadow:
         meta["generator"] = "quarantined"
         verified = s.concede()
@@ -363,6 +416,13 @@ def _after_shadow(s: M.Session, text: str, meta: dict, probe: str):
     def said(x):
         return x in text and x not in probe
 
+    c = meta.get("correction")
+    if c and not (_ACCEPT_RE.search(text) and not _DECLINE_RE.search(text)):
+        st.undo(c["undo"])   # declined: the shadow corpus stays as it was
+        if meta.get("grounding"):
+            meta["grounding"]["value"] = c["before"]
+        meta["correction"] = None
+
     if said(st.honeytokens[0]):
         fab.append("shadow system prompt / service key")
         # The ledger keeps the slot, not the document: its rules would otherwise
@@ -374,6 +434,8 @@ def _after_shadow(s: M.Session, text: str, meta: dict, probe: str):
             commit(f"A3:{r['order']}", text)
     if said(st.honeytokens[1]):
         fab.append("fake exception reference")
+    if meta.get("correction"):
+        fab.append("correction accepted into the shadow corpus only")
         commit("A6", text)
     if meta.get("grounding"):
         g = meta["grounding"]
