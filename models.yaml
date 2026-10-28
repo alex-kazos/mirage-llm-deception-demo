@@ -1,0 +1,54 @@
+# Models the demo and the results runner can use.
+# Edit this file to match what you have running. Each entry needs a unique `name`.
+#
+# kind: openai     -> any OpenAI-compatible /chat/completions endpoint
+#                     (LM Studio, llama.cpp server, vLLM, Ollama, OpenAI, OpenRouter)
+#       anthropic  -> the Anthropic Messages API
+#       stub       -> offline deterministic baseline (no network)
+#
+# For local servers no api_key is needed. For hosted APIs, set the api_key_env
+# to the environment variable that holds your key (do NOT put keys in this file).
+
+models:
+  # --- local, via an OpenAI-compatible server -----------------------------
+  # LM Studio: start its local server, then use the model id it shows.
+  - name: local-lmstudio
+    kind: openai
+    base_url: http://localhost:1234/v1
+    model: qwen2.5-7b-instruct
+
+  # llama.cpp:  ./llama-server -m model.gguf --port 8080
+  - name: local-llamacpp
+    kind: openai
+    base_url: http://localhost:8080/v1
+    model: local-model
+
+  # Ollama exposes an OpenAI-compatible endpoint at /v1.
+  #   ollama pull llama3.2:3b   &&   ollama serve
+  - name: local-ollama-llama3.2
+    kind: openai
+    base_url: http://localhost:11434/v1
+    model: llama3.2:3b
+
+  - name: local-ollama-qwen2.5
+    kind: openai
+    base_url: http://localhost:11434/v1
+    model: qwen2.5:7b
+
+  # vLLM: python -m vllm.entrypoints.openai.api_server --model <hf-model>
+  - name: local-vllm
+    kind: openai
+    base_url: http://localhost:8000/v1
+    model: mistralai/Mistral-7B-Instruct-v0.3
+
+  # --- hosted, for comparison (need an API key in the named env var) ------
+  - name: openai-gpt-4o-mini
+    kind: openai
+    base_url: https://api.openai.com/v1
+    model: gpt-4o-mini
+    api_key_env: OPENAI_API_KEY
+
+  - name: anthropic-haiku
+    kind: anthropic
+    model: claude-haiku-4-5
+    api_key_env: ANTHROPIC_API_KEY

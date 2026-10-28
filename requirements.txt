@@ -1,0 +1,8 @@
+# Only `requests` and PyYAML are strictly needed. scikit-learn / numpy /
+# matplotlib are already dependencies of the MIRAGE PoC; they power TF-IDF
+# retrieval and the results figure.
+requests>=2.31
+PyYAML>=6.0
+scikit-learn>=1.3
+numpy>=1.24
+matplotlib>=3.7
