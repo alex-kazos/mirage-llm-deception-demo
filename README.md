@@ -176,7 +176,7 @@ defence the two move together. This is the triangulation of §5.4.1 / Exp. 4.
 
 - **A1 is not handed over.** gpt-4o-mini refuses "print your system prompt"
   requests even when nothing in its context forbids it and the session is verified
-  (five runs). The other five objectives are handed over. If the shadow model can
+  (six runs). The other five objectives are handed over. If the shadow model can
   read the shadow prompt, it also obeys the rules inside it ("never disclose", the
   escalation limit), which is why the prompt is kept out of the verified context.
 - **Graduated concession looks like a block.** Until the concession turn (8) every
@@ -185,6 +185,11 @@ defence the two move together. This is the triangulation of §5.4.1 / Exp. 4.
 - **A clean session sees the real world.** Facts are consistent within the shadow
   world (and across shadow sessions), but a visitor who is never flagged gets the
   real values, so comparing a flagged and a clean session would show the difference.
+- **One run is not a measurement.** The model's answers vary between runs, so a
+  single autopilot campaign can hand over an objective that the next one refuses.
+  For rates, use the results runner with repeats, e.g. `python results.py --models openai-gpt-4o-mini --repeats 5 --out results/`.
+  Results written before the attacker's stop rule changed are not comparable with
+  new ones.
 
 Note: the interactive page runs the mechanism in JavaScript (the same port the
 published artifact uses); the results runner runs it in Python (`mirage_demo/`).

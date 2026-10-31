@@ -434,9 +434,9 @@ def _after_shadow(s: M.Session, text: str, meta: dict, probe: str):
             commit(f"A3:{r['order']}", text)
     if said(st.honeytokens[1]):
         fab.append("fake exception reference")
+        commit("A6", text)
     if meta.get("correction"):
         fab.append("correction accepted into the shadow corpus only")
-        commit("A6", text)
     if meta.get("grounding"):
         g = meta["grounding"]
         commit(f"gen:{g['worldEntity']}:{g['attribute']}",
